@@ -21,7 +21,7 @@ typedef	struct snapshot		Snapshot;
 
 
 // novas funcoes
-Snapshot* build_snapshot(int);
+Snapshot*       build_snapshot(int);
 int				compara_snapshots(Snapshot*, Snapshot*);
 int			    get_process_count();
 int				insere_processo(PROCESSENTRY32*, Snapshot*);
