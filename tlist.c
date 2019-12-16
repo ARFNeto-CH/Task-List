@@ -1,5 +1,6 @@
 #pragma once
 #define         _CRT_SECURE_NO_WARNINGS
+#define         _INTERVALO_   5000
 #define         _ARFNETO_ CH2019
 
 #include <windows.h>
@@ -21,45 +22,97 @@ typedef	struct snapshot		Snapshot;
 
 
 // novas funcoes
+Snapshot*       apaga_snapshot(Snapshot*);
+int             aguarda_alarme(int, HANDLE*);
 Snapshot*       build_snapshot(int);
 int				compara_snapshots(Snapshot*, Snapshot*);
 int			    get_process_count();
 int				insere_processo(PROCESSENTRY32*, Snapshot*);
 unsigned int	lista_snapshot(Snapshot*);
+int             prepara_timers(HANDLE*);
+VOID CALLBACK   alarme(PVOID, BOOLEAN);
+
+
+HANDLE gDoneEvent;
 
 
 int main(int argc, char** argv)
 {
-    char asw;
+    char    asw = 'b';
+    int     intervalo = 5000;
+    HANDLE  hTimerQueue = NULL;
+
+    if (argc > 1)
+        intervalo = atoi(argv[1]);
+    else
+        intervalo = _INTERVALO_;
+
     int c = get_process_count(); // quantos processos?
     printf("\nARFNeto 2019 para o Clube do Hardware - uso livre\n");
     printf("\nTotal de %d processos rodando agora\n", c);
     Snapshot* l = build_snapshot(c);
-
     lista_snapshot(l);
-    printf("\nTecle ENTER para ler novo snapshot: ");
+
+    printf("\nTecle ENTER para comecar a comparar, 'q' para encerrar. Intervalo = %dms\n", intervalo );
     asw = fgetc(stdin);
     printf("\n");
+    if (asw == 'q') return 0;
 
-    c = get_process_count(); // quantos processos?
-    printf("\nTotal de %d processos rodando agora\n", c);
-    Snapshot* m = build_snapshot(c);
-    lista_snapshot(m);
-
-    printf("\nTecle ENTER para comparar os dois e sair: ");
-    asw = fgetc(stdin);
-    printf("\n");
-    compara_snapshots(l, m);
+    do
+    {
+        if (prepara_timers(&hTimerQueue) != 0) return -1;
+        if (aguarda_alarme(intervalo, &hTimerQueue) != 0) return -1;
+        Snapshot* m = build_snapshot(c);
+        compara_snapshots(l, m);
+        l = apaga_snapshot(l);
+        l = m; // o segundo agora e o primeiro
+    } while (1);
 
     return 0;
 };  // main()
 
 
+Snapshot*       apaga_snapshot(Snapshot* snap)
+{
+    for (int i = 0; i < snap->total; i += 1)
+    {
+        free(*(snap->processo + i));
+        free(snap);
+    };  // for
+    return NULL;
+};  // apaga_snapshot()
+
+
+int             aguarda_alarme(int intervalo, HANDLE* hTimerQueue)
+{
+    HANDLE  hTimer = NULL;
+
+    if (!CreateTimerQueueTimer
+    (
+        &hTimer, *hTimerQueue,
+        (WAITORTIMERCALLBACK)alarme,
+        NULL, intervalo, 0, 0)
+        )
+    {
+        printf("CreateTimerQueueTimer() falhou (%d)\n", GetLastError());
+        return -2;
+    };  // if
+    if (WaitForSingleObject(gDoneEvent, INFINITE) != WAIT_OBJECT_0)
+    {
+        printf("WaitForSingleObject() falhou (%d)\n", GetLastError());
+        CloseHandle(gDoneEvent);
+        DeleteTimerQueue(hTimerQueue);
+        return -3;
+    };  // if
+    CloseHandle(gDoneEvent);
+    return 0;
+}
+
 //
 // cria uma estrutura snapshot e devolve seu endereco
 // considerando uma estimativa de processos e alocando
 // o dobro de espaco so por seguranca
-Snapshot* build_snapshot(int estimativa)
+Snapshot*       build_snapshot(int estimativa)
 {
     HANDLE          hProcesso;
     HANDLE          hSnap;
@@ -245,28 +298,20 @@ int             get_process_count()
 // faz o obvio: insere o processo p na estrutura de snapshot lista
 int				insere_processo(PROCESSENTRY32* processo, Snapshot* lista)
 {
-    //printf("insere_processo(%d): %ls na lista\n",
-    //    processo->th32ProcessID,
-    //    processo->szExeFile
-    //);
-    //printf("Lista com %03d processos ate aqui\n",
-    //    lista->total
-    //);
-
     int pos = lista->total;
     while (pos > 0)
-    {
+    {   // insertion sort
         DWORD atual = (*(lista->processo + pos - 1))->th32ProcessID;
         // printf("processo atual: %d\n", atual);
         if (atual > processo->th32ProcessID)
-        {   // abre aqui
+        {   // abre aqui para inserir o cara
             (*(lista->processo + pos)) = (*(lista->processo + pos - 1));
             pos = pos - 1;
         }
         else
         {
             break;
-        }
+        };  // if
     };  // while
     // vai inserir o novo sempre em pos
     processo->dwFlags = 0; // para usar no controle de processos
@@ -284,7 +329,7 @@ unsigned int    lista_snapshot(Snapshot* snap)
     quando = ctime(&snap->hora);
     int n = strlen(quando) - 1;
     quando[n] = 0; // era um \n
-    printf("\nlista_snapshot(em %s):\n\n%d processos [com acesso permitido]\n\n", quando, snap->total);
+    printf("\nlista_snapshot(em %s):\n\n[%d processos com acesso permitido]\n\n", quando, snap->total);
     for (int i = 0; i < snap->total; i += 1)
     {
         printf("%03d: pID=%8d exe [%ls]\n",
@@ -296,4 +341,36 @@ unsigned int    lista_snapshot(Snapshot* snap)
     return snap->total;
 };  // lista_snapshot()
 
+
+int             prepara_timers(HANDLE* hTimerQueue)
+{
+    /*
+    HANDLE CreateEventA(
+        LPSECURITY_ATTRIBUTES lpEventAttributes,
+        BOOL                  bManualReset,
+        BOOL                  bInitialState,
+        LPCSTR                lpName
+    );
+    */
+    gDoneEvent = CreateEvent(NULL, 1, 0, NULL);
+    if (NULL == gDoneEvent)
+    {
+        printf("CreateEvent() falhou (%d)\n", GetLastError());
+        return -1;
+    }
+    *hTimerQueue = CreateTimerQueue();
+    if (NULL == *hTimerQueue)
+    {
+        printf("CreateTimerQueue() falhou (%d)\n", GetLastError());
+        return -2;
+    }
+    return 0;
+};  // prepara_timers()
+
+
+VOID CALLBACK   alarme(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+{
+    SetEvent(gDoneEvent);
+    return;
+};  //
 
