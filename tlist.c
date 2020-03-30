@@ -1,16 +1,19 @@
 #pragma once
+
 #define         _CRT_SECURE_NO_WARNINGS
 #define         _INTERVALO_   5000
 #define         _ARFNETO_ CH2019
-
-#include <windows.h>
-#include <tlhelp32.h>
-#include <tchar.h>
+#define         _QUIT_  'q'
 
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"
+#include <tlhelp32.h>
+#include <tchar.h>
+#include "wchar.h"
+#include <windows.h>
 
+#include "ch-console.h"
 
 struct snapshot
 {
@@ -41,27 +44,63 @@ int main(int argc, char** argv)
     char    asw = 'b';
     int     intervalo = 5000;
     HANDLE  hTimerQueue = NULL;
+    char    mensagem[80];
 
     if (argc > 1)
         intervalo = atoi(argv[1]);
     else
         intervalo = _INTERVALO_;
 
+    restaura_cores(0); // salva as cores
+    cls();
     int c = get_process_count(); // quantos processos?
     printf("\nARFNeto 2019 para o Clube do Hardware - uso livre\n");
     printf("\nTotal de %d processos rodando agora\n", c);
     Snapshot* l = build_snapshot(c);
     lista_snapshot(l);
-
-    printf("\nTecle ENTER para comecar a comparar, 'q' para encerrar. Intervalo = %dms\n", intervalo );
-    asw = fgetc(stdin);
-    printf("\n");
-    if (asw == 'q') return 0;
+    sprintf(mensagem,
+        "\nTecle ENTER para comecar a comparar, 'q' para encerrar. Intervalo = % dms",
+        intervalo);
+    mensagem_em_video_reverso(mensagem);
+    printf("\n\n> ");
+    c = fgetc(stdin);
+    if (c == _QUIT_)
+    {
+        l = apaga_snapshot(l);
+        return 0;
+    };  // if
+    cls();
 
     do
     {
         if (prepara_timers(&hTimerQueue) != 0) return -1;
         if (aguarda_alarme(intervalo, &hTimerQueue) != 0) return -1;
+        switch (choice())
+        {
+        case 0:
+            break;
+
+        case _QUIT_:
+            mensagem_em_video_reverso("Tecle ENTER para encerrar");
+            printf("\n\n> ");
+            c = fgetc(stdin);
+            l = apaga_snapshot(l);
+            return 0;
+
+        default:
+            lista_snapshot(l);
+            mensagem_em_video_reverso("Tecle ENTER para voltar, 'q' para encerrar");
+            printf("\n\n> ");
+            c = fgetc(stdin);
+            if (c == _QUIT_)
+            {
+                l = apaga_snapshot(l);
+                return 0;
+            };  // if
+            break;
+        };  // switch()
+        FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+        Sleep(100);
         Snapshot* m = build_snapshot(c);
         compara_snapshots(l, m);
         l = apaga_snapshot(l);
@@ -71,6 +110,169 @@ int main(int argc, char** argv)
     return 0;
 };  // main()
 
+
+//////////////////////////////////////////////////////////////////////
+// console
+
+
+int		cls()
+{	// limpa a tela no windows, do jeito oficial
+    CONSOLE_SCREEN_BUFFER_INFO		info;
+    HANDLE		H = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD		origem = { 0,0 };
+    int			total;
+    if (H == INVALID_HANDLE_VALUE) return -1;
+    GetConsoleScreenBufferInfo(H, &info);
+    int r = FillConsoleOutputCharacter(H, (TCHAR)' ',
+        info.dwSize.X * info.dwSize.Y,
+        origem, &total);
+    int s = FillConsoleOutputAttribute(
+        H, info.wAttributes,
+        info.dwSize.X * info.dwSize.Y,
+        origem, &total);
+    SetConsoleCursorPosition(H, origem);
+    return 0;
+};	// end cls()
+
+
+WORD    cor_atual_fundo()
+{
+    HANDLE	H = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO		info;
+    GetConsoleScreenBufferInfo(H, &info);
+    return (info.wAttributes & 0xF0);
+};	// cor_atual_fundo()
+
+
+WORD    cor_atual_letras()
+{
+    HANDLE	H = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO		info;
+    GetConsoleScreenBufferInfo(H, &info);
+    return (info.wAttributes & 0xF);
+};	// cor_atual_letras()
+
+
+char	choice()
+{
+    HANDLE		I = GetStdHandle(STD_INPUT_HANDLE);
+    int		total = 0;
+    typedef struct _INPUT_RECORD Input;
+    char	c;
+    Input	buffer[2];
+    int n = PeekConsoleInput(I, buffer, 2, (LPDWORD)&total);
+    if (total == 0) return 0;
+    if (buffer[0].EventType == KEY_EVENT)
+    {
+        if (buffer[0].Event.KeyEvent.bKeyDown)
+        {
+            c = buffer[0].Event.KeyEvent.uChar.AsciiChar;
+            FlushConsoleInputBuffer(I);
+            return c;
+        };	// if
+    };	// if()
+    return 0;
+};	// choice()
+
+
+void	gotoYX(int linha, int coluna)
+{
+    static COORD	coord;
+    HANDLE			H = GetStdHandle(STD_OUTPUT_HANDLE);
+    coord.X = coluna; coord.Y = linha;
+    SetConsoleCursorPosition(H, coord);
+    return;
+};	// gotoXY
+
+
+void	mensagem_em_video_reverso(char* mensagem)
+{
+    HANDLE	H = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO		info;
+    GetConsoleScreenBufferInfo(H, &info);
+    WORD foreground = info.wAttributes & 0xF;
+    WORD background = info.wAttributes & 0xF0;
+    text_color(background, foreground);
+    printf("%s", mensagem);
+    text_color(foreground, background);
+    return;
+}	// mensagem_em_video_reverso()
+
+
+void    mensagem_em_cores(char* mensagem, const char letras, const char fundo)
+{
+    // mostra a mensagem na posicao do cursor, usando as cores 'letras'
+    // e o fundo 'fundo', mas retornando ao que estava configurado
+    // antes
+    if (strlen(mensagem) == 0) return; // sem mensagem
+    text_color(letras, fundo); // muda a cor
+    printf("%s\n", mensagem); // escreve
+    restaura_cores(1); // volta ao original
+    return;
+};	// mensagem_em_cores()
+
+
+void mostra_grade_256_cores()
+{
+    cls();
+    text_color(15, 0);	/* preto sobre branco */
+    printf("Gabarito (Frente|Fundo) escritona linha 5 coluna 10\n");
+    printf("    os numeros sao das cores que o windows usa\n\n\n");
+
+    for (int letra = 0; letra < 16; letra += 1)
+    {
+        for (int fundo = 0; fundo < 16; fundo += 1)
+        {
+            text_color(letra, fundo);
+            printf(" %2d %2d ", letra, fundo);
+            text_color(_branco_, _preto_);
+            printf("  ");
+        }
+        text_color(_branco_, _preto_);
+        printf(" \n");
+    }
+
+    printf("\nteste: antes de escrever em amarelo sobre preto\n");
+    text_color(_amarelo_, _preto_);
+    printf("Amarelo sobre preto: os numeros sao das cores que o windows usa\n");
+    text_color(_branco_, _preto_);
+    printf("teste depois de restaurar a cor\n");
+
+    return;
+};	// mostra_grade_256_cores()
+
+
+void restaura_cores(int parm)
+{
+    HANDLE	H = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO		info;
+    static WORD init_letras = -1; // invalidado
+    static WORD init_fundo = -1; // invalidado
+
+    if (parm == 0)
+    {	// chamada inicial: salva as cores em uso no terminal
+        // para poder restaurar a qualqeur momento
+        GetConsoleScreenBufferInfo(H, &info);
+        init_letras = info.wAttributes & 0xF;
+        init_fundo = info.wAttributes & 0xF0;
+    }
+    else
+    {	// restaura
+        if (init_letras > 0)
+            text_color(init_letras, init_fundo);
+    };	// if
+    return;
+};	// restaura_cores()
+
+
+void	text_color(int letras, int fundo)
+{
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), letras | (fundo << 4));
+}	// text_color
+
+
+//////////////////////////////////////////////////////////////////////
+// processos
 
 Snapshot*       apaga_snapshot(Snapshot* snap)
 {
@@ -181,14 +383,17 @@ Snapshot*       build_snapshot(int estimativa)
 //
 int				compara_snapshots(Snapshot* A, Snapshot* B)
 {
-    int i, j, n;
-    char a_hora[40];
-    char* quando = a_hora;
+    int       i, j, n;
+    char      a_hora[40];
+    char*     quando = a_hora;
+
     quando = ctime(&A->hora);
     n = strlen(quando) - 1;
     quando[n] = 0;  // era um \n
 
     printf("\ncompara_snapshots()\n\n");
+    mensagem_em_video_reverso(" Use qualquer tecla para ver a lista de novo, ou 'q' para encerrar ");
+    printf(" \n\n");
 
     printf("Snapshot A(%s): %d processos\n", quando, A->total);
     quando = ctime(&B->hora);
@@ -228,36 +433,68 @@ int				compara_snapshots(Snapshot* A, Snapshot* B)
     }   // for
 
     // lista os que se foram
-    printf("\nProcessos encerrados:\n\n");
     int enc = 0;
     for (i = 0; i < A->total; i += 1)
-    {
-        if ((*(A->processo + i))->dwFlags == 1)
-        {
-            enc += 1;
-            printf("%03d: pID=%8d exe [%ls]\n",
-                enc,
-                (*(A->processo + i))->th32ProcessID,
-                (*(A->processo + i))->szExeFile
-            );
-        };  // if
+    {   // so conta por enquanto
+        if ((*(A->processo + i))->dwFlags == 1) enc += 1;
     };  // for
+    if (enc > 0)
+    {   // so mostra se ao menos um processo foi encerrado no periodo
+        printf("\n");
+        mensagem_em_cores(" Processos encerrados nesse intervalo: ", _amarelo_, _vermelho_);
+        printf("\n\n");
+        int enc = 0;
+        for (i = 1; i <= A->total; i += 1)
+        {
+            if ((*(A->processo + i - 1))->dwFlags == 1)
+            {
+                enc += 1;
+                printf("%03d: pID=%8d exe ",
+                    enc,
+                    (*(A->processo + i - 1))->th32ProcessID
+                );
+                wprintf(L"[%ls]\n", (*(A->processo + i - 1))->szExeFile);
+            };  // if
+        };  // for
+    }
+    else
+    {
+        printf("\n");
+        mensagem_em_video_reverso(" Nenhum processo foi encerrado ");
+        printf(" \n\n");
+    };   // if
 
     // lista os que foram iniciados depois
-    printf("\nProcessos criados:\n\n");
     int criados = 0;
     for (i = 0; i < B->total; i += 1)
     {
-        if ((*(B->processo + i))->dwFlags == 1)
-        {
-            criados += 1;
-            printf("%03d: pID=%8d exe [%ls]\n",
-                criados,
-                (*(B->processo + i))->th32ProcessID,
-                (*(B->processo + i))->szExeFile
-            );
-        };  // if
+        if ((*(B->processo + i))->dwFlags == 1) criados += 1;
     };   // for
+    if (criados > 0)
+    {
+        printf("\n");
+        mensagem_em_cores(" Processos criados nesse intervalo: ", _branco_, _verde_);
+        printf("\n\n");
+        int criados = 0;
+        for (i = 1; i <= B->total; i += 1)
+        {
+            if ((*(B->processo + i - 1))->dwFlags == 1)
+            {
+                criados += 1;
+                printf("%03d: pID=%8d exe ",
+                    criados,
+                    (*(B->processo + i - 1))->th32ProcessID
+                );
+                wprintf(L"[%ls]\n", (*(A->processo + i - 1))->szExeFile);
+            };  // if
+        };   // for
+    }
+    else
+    {
+        printf("\n");
+        mensagem_em_video_reverso(" Nenhum processo foi criado ");
+        printf(" \n\n");
+    }
 
     printf("\nIntervalo entre as consultas: %gs\n\n", difftime(B->hora, A->hora));
     return 0;
@@ -330,13 +567,13 @@ unsigned int    lista_snapshot(Snapshot* snap)
     int n = strlen(quando) - 1;
     quando[n] = 0; // era um \n
     printf("\nlista_snapshot(em %s):\n\n[%d processos com acesso permitido]\n\n", quando, snap->total);
-    for (int i = 0; i < snap->total; i += 1)
+    for (int i = 1; i <= snap->total; i += 1)
     {
-        printf("%03d: pID=%8d exe [%ls]\n",
+        printf("%03d: pID=%8d exe ",
             i,
-            (*(snap->processo + i))->th32ProcessID,
-            (*(snap->processo + i))->szExeFile
+            (*(snap->processo + i - 1))->th32ProcessID
         );
+        wprintf(L"[%ls]\n", (*(snap->processo + i - 1))->szExeFile);
     }
     return snap->total;
 };  // lista_snapshot()
