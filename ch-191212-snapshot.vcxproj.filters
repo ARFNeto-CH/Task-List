@@ -18,9 +18,6 @@
     <ClCompile Include="tlist.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ch-console.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ch-console.h">

@@ -19,9 +19,9 @@
 #define		_amarelo_         14
 #define		_branco_          15
 
+#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
 
 #include "ch-console.h"
 

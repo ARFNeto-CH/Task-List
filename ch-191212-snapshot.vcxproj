@@ -153,7 +153,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="ch-console.c" />
     <ClCompile Include="tlist.c" />
   </ItemGroup>
   <ItemGroup>

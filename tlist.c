@@ -5,6 +5,7 @@
 #define         _ARFNETO_ CH2019
 #define         _QUIT_  'q'
 
+#include <windows.h>
 #include "stdio.h"
 #include "stdlib.h"
 #include "time.h"
